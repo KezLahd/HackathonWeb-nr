@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 10% 4%;
+    --foreground: 0 0% 95%;
+    --card: 220 10% 6%;
+    --card-foreground: 0 0% 95%;
+    --popover: 220 10% 6%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 195 100% 50%;
+    --primary-foreground: 220 10% 4%;
+    --secondary: 220 10% 10%;
+    --secondary-foreground: 0 0% 95%;
+    --muted: 220 10% 10%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 271 81% 56%;
+    --accent-foreground: 0 0% 95%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 95%;
+    --border: 220 10% 15%;
+    --input: 220 10% 15%;
+    --ring: 195 100% 50%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-dark-bg text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  .glow-effect {
+    @apply relative;
+  }
+
+  .glow-effect::before {
+    content: "";
+    @apply absolute inset-0 rounded-lg opacity-75 blur-sm;
+    background: linear-gradient(45deg, #00d4ff, #8b5cf6, #14b8a6);
+    z-index: -1;
+  }
+
+  .text-glow {
+    text-shadow: 0 0 10px currentColor;
+  }
+
+  .border-glow {
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+  }
+
+  .animated-bg {
+    background: linear-gradient(-45deg, #0a0a0a, #1a1a1a, #0a0a0a, #2a2a2a);
+    background-size: 400% 400%;
+    animation: gradient 15s ease infinite;
+  }
+
+  @keyframes gradient {
+    0% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 0% 50%;
+    }
+  }
+}
