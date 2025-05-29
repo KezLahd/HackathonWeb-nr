@@ -3,17 +3,41 @@ import nodemailer from "nodemailer"
 // Email configuration
 const EMAIL_CONFIG = {
   host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
+  port: 465,
+  secure: true,
   auth: {
-    user: "hackathon@mjsons.net",
+    user: process.env.GMAIL_USER,
     pass: process.env.GMAIL_PASSWORD,
   },
 }
 
 // Create transporter
 const createTransporter = () => {
-  return nodemailer.createTransport(EMAIL_CONFIG)
+  const gmailUser = process.env.GMAIL_USER
+  const gmailPassword = process.env.GMAIL_PASSWORD
+
+  if (!gmailPassword) {
+    throw new Error("GMAIL_PASSWORD environment variable is not set")
+  }
+
+  console.log("🔑 EMAIL CONFIG - Password details:", {
+    length: gmailPassword.length,
+    hasSpaces: gmailPassword.includes(" "),
+    spaceCount: gmailPassword.split(" ").length - 1,
+    firstChars: gmailPassword.substring(0, 4),
+    lastChars: gmailPassword.substring(gmailPassword.length - 4),
+    rawValue: gmailPassword
+  })
+
+  return nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: {
+      user: gmailUser,
+      pass: gmailPassword,
+    },
+  })
 }
 
 // Send confirmation email with your custom template
@@ -145,7 +169,7 @@ export async function sendConfirmationEmail(to: string, confirmationUrl: string,
     const result = await transporter.sendMail(mailOptions)
     console.log("✅ Confirmation email sent:", result.messageId)
     return { success: true, messageId: result.messageId }
-  } catch (error) {
+  } catch (error: any) {
     console.error("❌ Email sending failed:", error)
     return { success: false, error: error.message }
   }
@@ -219,7 +243,7 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string, fullN
     const result = await transporter.sendMail(mailOptions)
     console.log("✅ Password reset email sent:", result.messageId)
     return { success: true, messageId: result.messageId }
-  } catch (error) {
+  } catch (error: any) {
     console.error("❌ Email sending failed:", error)
     return { success: false, error: error.message }
   }
@@ -236,12 +260,22 @@ export async function sendHackathonInvitationEmail(
   try {
     console.log("📧 EMAIL SERVICE - Creating transporter...")
     const transporter = createTransporter()
+    
+    // Verify the connection before sending
+    console.log("📧 EMAIL SERVICE - Verifying connection...")
+    await transporter.verify()
+    console.log("✅ EMAIL SERVICE - Connection verified")
+
+    const gmailUser = process.env.GMAIL_USER
+    if (!gmailUser) {
+      throw new Error("GMAIL_USER environment variable is not set")
+    }
 
     console.log("📧 EMAIL SERVICE - Preparing email options...")
     const mailOptions = {
       from: {
         name: "Hackathon Planner",
-        address: "hackathon@mjsons.net",
+        address: gmailUser,
       },
       to,
       subject: `You're Invited to ${hackathonTitle} – Hackathon Planner`,
@@ -370,8 +404,15 @@ export async function sendHackathonInvitationEmail(
     const result = await transporter.sendMail(mailOptions)
     console.log("✅ Hackathon invitation email sent:", result.messageId)
     return { success: true, messageId: result.messageId }
-  } catch (error) {
+  } catch (error: any) {
     console.error("❌ Hackathon invitation email failed:", error)
+    console.error("❌ Error details:", {
+      code: error.code,
+      command: error.command,
+      responseCode: error.responseCode,
+      response: error.response,
+      stack: error.stack
+    })
     return { success: false, error: error.message }
   }
 }

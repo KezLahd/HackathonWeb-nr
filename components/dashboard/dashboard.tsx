@@ -10,6 +10,7 @@ import { CreateHackathonModal } from "./create-hackathon-modal"
 import { HackathonCard } from "./hackathon-card"
 import { useRouter } from "next/navigation"
 import { JoinHackathonModal } from "./join-hackathon-modal"
+import { ensureProfile } from "@/lib/supabase-profile"
 
 interface Hackathon {
   id: string
@@ -44,6 +45,7 @@ export function Dashboard({ onSignOut }: DashboardProps) {
       data: { user },
     } = await supabase.auth.getUser()
     setUser(user)
+    await ensureProfile(user)
   }
 
   const loadHackathons = async () => {

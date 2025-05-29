@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { supabase } from "@/lib/supabase"
-import { Loader2, Zap, Mail, CheckCircle, AlertCircle, LogIn, UserPlus } from "lucide-react"
+import { Loader2, Zap, Mail, CheckCircle, AlertCircle, LogIn, UserPlus, Chrome } from "lucide-react"
 
 interface EnhancedAuthFormProps {
   onSuccess: () => void
@@ -177,6 +177,34 @@ export function EnhancedAuthForm({ onSuccess }: EnhancedAuthFormProps) {
     }
   }
 
+  const handleGoogleSignIn = async () => {
+    try {
+      setIsLoading(true)
+      setError("")
+      
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      })
+
+      if (error) throw error
+      
+      // The redirect will happen automatically
+      console.log("✅ Google sign-in initiated")
+    } catch (error: any) {
+      console.error("❌ Google sign-in error:", error)
+      setError("Failed to sign in with Google. Please try again.")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   if (needsEmailConfirmation) {
     return (
       <div className="min-h-screen flex items-center justify-center animated-bg p-4">
@@ -329,6 +357,24 @@ export function EnhancedAuthForm({ onSuccess }: EnhancedAuthFormProps) {
                   required
                   className="bg-dark-bg border-dark-border focus:border-electric-blue"
                 />
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-dark-border" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-dark-surface/80 px-2 text-muted-foreground">Or continue with</span>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleGoogleSignIn}
+                  disabled={isLoading}
+                  className="w-full border-dark-border hover:bg-dark-surface text-muted-foreground hover:text-electric-blue"
+                >
+                  <Chrome className="h-4 w-4 mr-2" />
+                  Sign in with Google
+                </Button>
                 <Button
                   type="submit"
                   disabled={isLoading}
@@ -407,6 +453,25 @@ export function EnhancedAuthForm({ onSuccess }: EnhancedAuthFormProps) {
                     </div>
                   </div>
                 </div>
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-dark-border" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-dark-surface/80 px-2 text-muted-foreground">Or continue with</span>
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleGoogleSignIn}
+                  disabled={isLoading}
+                  className="w-full border-dark-border hover:bg-dark-surface text-muted-foreground hover:text-electric-blue"
+                >
+                  <Chrome className="h-4 w-4 mr-2" />
+                  Sign up with Google
+                </Button>
 
                 <Button
                   type="submit"

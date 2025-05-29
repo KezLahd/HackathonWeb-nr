@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { supabase } from "@/lib/supabase"
 import { getUserSharedHackathons } from "@/app/actions/invitation-actions"
 import { Calendar, Users, ArrowRight, Share2, Loader2, AlertTriangle } from "lucide-react"
+import { ensureProfile } from "@/lib/supabase-profile"
 
 interface SharedHackathon {
   id: string
@@ -53,9 +54,11 @@ export default function SharedHackathonsPage() {
 
       setUser(user)
 
+      await ensureProfile(user)
+
       const result = await getUserSharedHackathons(user.email!)
       if (result.success) {
-        setHackathons(result.hackathons)
+        setHackathons(Array.isArray(result.hackathons) ? result.hackathons : [])
         setError(null)
       } else {
         console.error("Error loading shared hackathons:", result.error)

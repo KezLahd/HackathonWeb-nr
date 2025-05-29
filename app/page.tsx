@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
 import { EnhancedAuthForm } from "@/components/auth/enhanced-auth-form"
 import { Dashboard } from "@/components/dashboard/dashboard"
+import { ensureProfile } from "@/lib/supabase-profile"
 
 export default function Home() {
   const [user, setUser] = useState<any>(null)
@@ -86,31 +87,6 @@ export default function Home() {
       subscription.unsubscribe()
     }
   }, [])
-
-  // Ensure profile exists (non-blocking)
-  const ensureProfile = async (user: any) => {
-    try {
-      const { data: existingProfile } = await supabase.from("profiles").select("id").eq("id", user.id).single()
-
-      if (!existingProfile) {
-        console.log("📝 Creating profile for user:", user.id)
-        const { error } = await supabase.from("profiles").insert({
-          id: user.id,
-          email: user.email,
-          full_name: user.user_metadata?.full_name || user.email?.split("@")[0] || "User",
-          created_at: new Date().toISOString(),
-        })
-
-        if (error && error.code !== "23505") {
-          console.error("❌ Profile creation failed:", error)
-        } else {
-          console.log("✅ Profile created successfully")
-        }
-      }
-    } catch (error) {
-      console.error("❌ Profile check/creation error:", error)
-    }
-  }
 
   // Show loading only for a short time
   if (loading && !authChecked) {

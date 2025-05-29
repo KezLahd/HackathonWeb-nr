@@ -2,6 +2,7 @@
 
 import { supabase } from "@/lib/supabase"
 import { sendInvitationEmail, testEmailService } from "./email-actions"
+import { supabaseServer } from "@/lib/supabase-server"
 
 // Generate a random token for invitations
 function generateInvitationToken(): string {
@@ -97,7 +98,7 @@ export async function sendHackathonInvitation(
       if (emailResult.success) {
         return {
           success: true,
-          message: `Invitation sent successfully to ${inviteeEmail}! (${emailResult.debug})`,
+          message: `Invitation sent successfully to ${inviteeEmail}!`,
           invitation: invitation,
         }
       } else {
@@ -173,8 +174,8 @@ export async function getPreviousCollaborators(userEmail: string) {
     const collaboratorMap = new Map()
 
     collaboratorData?.forEach((member) => {
-      if (member.profiles?.email) {
-        const email = member.profiles.email
+      if (member.profiles && typeof member.profiles === 'object' && !Array.isArray(member.profiles) && (member.profiles as any).email) {
+        const email = (member.profiles as any).email
         if (collaboratorMap.has(email)) {
           const existing = collaboratorMap.get(email)
           existing.hackathon_count += 1
@@ -183,8 +184,8 @@ export async function getPreviousCollaborators(userEmail: string) {
           }
         } else {
           collaboratorMap.set(email, {
-            email: member.profiles.email,
-            full_name: member.profiles.full_name,
+            email: (member.profiles as any).email,
+            full_name: (member.profiles as any).full_name,
             hackathon_count: 1,
             last_collaboration: member.joined_at,
           })
@@ -563,10 +564,13 @@ export async function getInvitationDetails(token: string) {
 
 export async function getUserSharedHackathons(userEmail: string) {
   try {
-    const { data: userProfile } = await supabase.from("profiles").select("id").eq("email", userEmail).single()
+    console.log('[getUserSharedHackathons] userEmail:', userEmail);
+    // Use supabaseServer for the profile query
+    const { data: userProfile, error: profileError } = await supabaseServer.from("profiles").select("id, email").eq("email", userEmail).single();
+    console.log('[getUserSharedHackathons] userProfile:', userProfile, 'profileError:', profileError);
 
     if (!userProfile) {
-      return { success: false, error: "User not found" }
+      return { success: false, error: `User not found for email: ${userEmail}` }
     }
 
     // Get hackathons where user is a team member (but not creator) AND pending invitations
@@ -626,10 +630,10 @@ export async function getUserSharedHackathons(userEmail: string) {
     const joinedHackathons =
       teamMemberships.data
         ?.map((item) => item.hackathon)
-        .filter((h) => h && h.status === "active")
+        .filter((h) => h && typeof h === 'object' && !Array.isArray(h) && (h as any).status === "active")
         .map((h) => ({
-          ...h,
-          creator: h.creator || null,
+          ...(h as any),
+          creator: (h as any).creator || null,
           status: "joined" as const,
         })) || []
 
@@ -637,8 +641,8 @@ export async function getUserSharedHackathons(userEmail: string) {
     const pendingHackathons =
       pendingInvitations.data
         ?.map((invitation) => ({
-          ...invitation.hackathon,
-          creator: invitation.hackathon?.creator || null,
+          ...(invitation.hackathon as any),
+          creator: (invitation.hackathon as any)?.creator || null,
           status: "pending" as const,
           invitation: {
             id: invitation.id,
@@ -647,7 +651,7 @@ export async function getUserSharedHackathons(userEmail: string) {
             inviter: invitation.inviter,
           },
         }))
-        .filter((h) => h && h.status === "active") || []
+        .filter((h) => h && typeof h === 'object' && !Array.isArray(h) && (h as any).status === "active") || []
 
     // Combine and sort by most recent activity
     const allHackathons = [...joinedHackathons, ...pendingHackathons].sort((a, b) => {

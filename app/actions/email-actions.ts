@@ -1,5 +1,7 @@
 "use server"
 
+import { EmailService } from "@/lib/email-service"
+
 export async function sendInvitationEmail(
   to: string,
   inviterName: string,
@@ -10,25 +12,28 @@ export async function sendInvitationEmail(
   try {
     console.log("📧 EMAIL ACTION - Starting email send:", { to, inviterName, hackathonTitle })
 
-    // For now, let's simulate email sending
-    // In a real environment, this would use nodemailer or a service like Resend
+    // Use the EmailService to actually send the email
+    const result = await EmailService.sendHackathonInvitation(
+      to,
+      inviterName,
+      hackathonTitle,
+      hackathonTheme,
+      inviteUrl
+    )
 
-    console.log("📧 EMAIL ACTION - Would send email with:")
-    console.log("  To:", to)
-    console.log("  From:", inviterName)
-    console.log("  Subject: Invitation to join", hackathonTitle)
-    console.log("  Theme:", hackathonTheme)
-    console.log("  Invite URL:", inviteUrl)
-
-    // Simulate email sending delay
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-
-    console.log("✅ EMAIL ACTION - Email simulation completed")
-
-    return {
-      success: true,
-      message: `Email simulation sent to ${to}`,
-      debug: "Server Action email simulation working",
+    if (result.success) {
+      console.log("✅ EMAIL ACTION - Email sent successfully")
+      return {
+        success: true,
+        message: `Email sent to ${to}`,
+        messageId: result.messageId
+      }
+    } else {
+      console.error("❌ EMAIL ACTION - Failed to send email:", result.error)
+      return {
+        success: false,
+        error: result.error
+      }
     }
   } catch (error: any) {
     console.error("❌ EMAIL ACTION - Error:", error)
@@ -47,8 +52,9 @@ export async function testEmailService() {
     const gmailUser = process.env.GMAIL_USER
     const gmailPassword = process.env.GMAIL_PASSWORD
 
-    console.log("🧪 EMAIL TEST - Gmail user available:", !!gmailUser)
-    console.log("🧪 EMAIL TEST - Gmail password available:", !!gmailPassword)
+    console.log("🧪 EMAIL TEST - Gmail user:", gmailUser)
+    console.log("🧪 EMAIL TEST - Gmail password length:", gmailPassword?.length)
+    console.log("🧪 EMAIL TEST - Gmail password first 4 chars:", gmailPassword?.substring(0, 4))
 
     if (!gmailUser || !gmailPassword) {
       return {
@@ -63,16 +69,20 @@ export async function testEmailService() {
       const nodemailer = await import("nodemailer")
       console.log("✅ EMAIL TEST - Nodemailer import successful")
 
-      // Try to create transporter
+      // Use the same transporter creation as the main email service
       const transporter = nodemailer.createTransport({
-        service: "gmail",
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true,
         auth: {
           user: gmailUser,
           pass: gmailPassword,
         },
       })
 
-      console.log("✅ EMAIL TEST - Transporter created successfully")
+      // Verify the connection
+      await transporter.verify()
+      console.log("✅ EMAIL TEST - Transporter verified successfully")
 
       return {
         success: true,
