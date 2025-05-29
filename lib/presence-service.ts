@@ -139,7 +139,7 @@ export class PresenceService {
       if (error) throw error
       return data || []
     } catch (error) {
-      console.error("Error getting active users:", error)
+      console.error("Error getting active users:", error, JSON.stringify(error));
       return []
     }
   }

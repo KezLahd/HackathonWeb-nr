@@ -83,8 +83,8 @@ export function ActivityFeed({ hackathonId, currentUserId }: ActivityFeedProps) 
           activities.push({
             id: `team-${member.id}`,
             type: "team_join",
-            user_name: member.profiles.full_name || member.profiles.email,
-            user_email: member.profiles.email,
+            user_name: member.profiles[0]?.full_name || member.profiles[0]?.email || "Unknown",
+            user_email: member.profiles[0]?.email || "",
             description: `${member.role === "creator" ? "Created" : "Joined"} the team`,
             timestamp: member.joined_at,
             metadata: { role: member.role },
@@ -110,8 +110,8 @@ export function ActivityFeed({ hackathonId, currentUserId }: ActivityFeedProps) 
           activities.push({
             id: `task-completed-${task.id}`,
             type: "task_completed",
-            user_name: task.assignee?.full_name || "Someone",
-            user_email: task.assignee?.email || "",
+            user_name: task.assignee[0]?.full_name || "Someone",
+            user_email: task.assignee[0]?.email || "",
             description: `Completed task "${task.title}"`,
             timestamp: task.completed_at,
             metadata: { taskTitle: task.title },
@@ -123,8 +123,8 @@ export function ActivityFeed({ hackathonId, currentUserId }: ActivityFeedProps) 
           activities.push({
             id: `task-assigned-${task.id}`,
             type: "task_assigned",
-            user_name: task.assignee.full_name || task.assignee.email,
-            user_email: task.assignee.email,
+            user_name: task.assignee[0]?.full_name || task.assignee[0]?.email || "Unknown",
+            user_email: task.assignee[0]?.email || "",
             description: `Was assigned task "${task.title}"`,
             timestamp: task.created_at,
             metadata: { taskTitle: task.title },

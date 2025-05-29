@@ -38,13 +38,25 @@ export function AddTaskModal({ isOpen, onClose, hackathonId, teamMembers, hackat
     setIsLoading(true)
 
     try {
+      // Fetch current max order_index for this hackathon
+      const { data: existingTasks, error: fetchError } = await supabase
+        .from("tasks")
+        .select("order_index")
+        .eq("hackathon_id", hackathonId)
+        .order("order_index", { ascending: false })
+        .limit(1)
+      if (fetchError) throw fetchError
+      const maxOrderIndex = existingTasks && existingTasks.length > 0 ? existingTasks[0].order_index : -1
+      const newOrderIndex = maxOrderIndex + 1
+
       const { error } = await supabase.from("tasks").insert({
         hackathon_id: hackathonId,
         title: formData.title,
         description: formData.description,
         priority: formData.priority,
         estimated_hours: formData.estimatedHours,
-        assigned_to: formData.assignedTo || null,
+        assigned_to: (formData.assignedTo ?? '') && formData.assignedTo !== 'unassigned' ? formData.assignedTo : null,
+        order_index: newOrderIndex,
       })
 
       if (error) throw error
@@ -75,7 +87,7 @@ export function AddTaskModal({ isOpen, onClose, hackathonId, teamMembers, hackat
     try {
       const result = await generateSmartTaskDescription(formData.title, hackathon?.theme || "", hackathon?.goal || "")
       if (result.success) {
-        setFormData({ ...formData, description: result.description })
+        setFormData({ ...formData, description: result.description ?? "" })
       } else {
         console.error("Failed to generate description:", result.error)
       }

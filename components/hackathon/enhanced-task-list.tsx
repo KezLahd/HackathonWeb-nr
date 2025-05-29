@@ -46,16 +46,19 @@ interface Task extends TaskWithOrder {
     full_name: string
     email: string
   }
+  completed_at?: string
 }
 
 interface EnhancedTaskListProps {
   hackathonId: string
   hackathon?: any
+  tasks: Task[]
+  teamMembers: any[]
+  onTasksChange: () => void
+  onTeamChange: () => void
 }
 
-export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListProps) {
-  const [tasks, setTasks] = useState<Task[]>([])
-  const [teamMembers, setTeamMembers] = useState<any[]>([])
+export function EnhancedTaskList({ hackathonId, hackathon, tasks, teamMembers, onTasksChange, onTeamChange }: EnhancedTaskListProps) {
   const [loading, setLoading] = useState(true)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
@@ -68,8 +71,9 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
   const [editValues, setEditValues] = useState<{
     title: string
     estimated_hours: number
-    priority: string
+    priority: "medium" | "high" | "low"
     description: string
+    order_index?: number
   }>({
     title: "",
     estimated_hours: 0,
@@ -82,24 +86,26 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
   const channelRef = useRef<any>(null)
   const mountedRef = useRef(true)
 
+  // Add state for tasks
+  const [localTasks, setLocalTasks] = useState<Task[]>(tasks)
+
+  // Update localTasks when props.tasks changes
+  useEffect(() => {
+    setLocalTasks(tasks)
+  }, [tasks])
+
   // Smart task ordering
   const orderedTasks = useMemo(() => {
-    return TaskOrderingService.calculateOptimalOrder(tasks)
-  }, [tasks])
+    return TaskOrderingService.calculateOptimalOrder(localTasks)
+  }, [localTasks])
 
   // Categorize tasks
   const categorizedTasks = useCallback(() => {
-    const unassigned = orderedTasks.filter((task) => !task.assigned_to && !task.completed)
-    const assigned = orderedTasks.filter((task) => task.assigned_to && !task.completed)
+    const ordered = orderedTasks.filter((task) => !task.completed)
+    const mytasks = ordered.filter((task) => task.assigned_to === currentUser?.id)
     const completed = orderedTasks.filter((task) => task.completed)
-
-    return {
-      ordered: orderedTasks.filter((task) => !task.completed),
-      unassigned,
-      assigned,
-      completed,
-    }
-  }, [orderedTasks])
+    return { ordered, mytasks, completed }
+  }, [orderedTasks, currentUser?.id])
 
   // Enhanced task loading using API endpoint
   const loadTasks = useCallback(
@@ -119,7 +125,7 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
             dependencies: task.dependencies || [],
           }))
 
-          setTasks(tasksWithOrder)
+          onTasksChange()
           setLastUpdate(new Date())
           setIsConnected(true)
           console.log("✅ Tasks loaded via API:", tasksWithOrder.length)
@@ -140,7 +146,7 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
         }
       }
     },
-    [hackathonId, toast],
+    [hackathonId, toast, onTasksChange],
   )
 
   const loadTeamMembers = useCallback(async () => {
@@ -149,7 +155,7 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
     try {
       const result = await ApiClient.getTeamMembers(hackathonId)
       if (result.success && mountedRef.current) {
-        setTeamMembers(result.members.map((member: any) => member.profiles).filter(Boolean))
+        onTeamChange()
       }
     } catch (error: any) {
       console.error("Error loading team members:", error)
@@ -161,7 +167,7 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
         })
       }
     }
-  }, [hackathonId, toast])
+  }, [hackathonId, toast, onTeamChange])
 
   // Setup real-time subscription for tasks
   const setupTasksRealtimeSubscription = useCallback(() => {
@@ -190,7 +196,7 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
           console.log(
             "🔄 REAL-TIME: Task change detected:",
             payload.eventType,
-            payload.new?.title || payload.old?.title,
+            (payload.new as { title?: string })?.title || (payload.old as { title?: string })?.title,
           )
           setIsConnected(true)
 
@@ -266,42 +272,27 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
 
   // Enhanced task completion using API
   const toggleTaskCompletion = async (taskId: string, completed: boolean) => {
+    // Optimistic update
+    setLocalTasks((prev) => prev.map((task) =>
+      task.id === taskId ? { ...task, completed, completed_at: completed ? new Date().toISOString() : undefined } : task
+    ))
     try {
-      // Optimistic update
-      setTasks((prev) =>
-        prev.map((task) =>
-          task.id === taskId ? { ...task, completed, completed_at: completed ? new Date().toISOString() : null } : task,
-        ),
-      )
-
-      const result = await ApiClient.completeTask(taskId, completed, currentUser?.id || "")
-
-      console.log("✅ Task completion updated via API")
-
-      // Auto-switch to appropriate tab after completion/reopening
-      if (completed) {
-        setTimeout(() => setActiveTab("completed"), 500)
-      } else {
-        setTimeout(() => setActiveTab("ordered"), 500)
-      }
-
+      await ApiClient.completeTask(taskId, completed, currentUser?.id || "")
       toast({
         title: completed ? "Task Completed! 🎉" : "Task Reopened",
         description: `Task has been ${completed ? "marked as complete" : "reopened"}`,
         variant: "default",
       })
+      if (completed) {
+        setTimeout(() => setActiveTab("completed"), 500)
+      } else {
+        setTimeout(() => setActiveTab("ordered"), 500)
+      }
     } catch (error: any) {
-      console.error("Error updating task completion:", error)
-
-      // Revert optimistic update on error
-      setTasks((prev) =>
-        prev.map((task) =>
-          task.id === taskId
-            ? { ...task, completed: !completed, completed_at: !completed ? new Date().toISOString() : null }
-            : task,
-        ),
-      )
-
+      // Revert on error
+      setLocalTasks((prev) => prev.map((task) =>
+        task.id === taskId ? { ...task, completed: !completed, completed_at: !completed ? new Date().toISOString() : undefined } : task
+      ))
       toast({
         title: "Error",
         description: "Failed to update task. Please try again.",
@@ -312,76 +303,24 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
 
   // Enhanced task assignment using API
   const assignTask = async (taskId: string, userId: string | null) => {
+    // Optimistic update
+    setLocalTasks((prev) => prev.map((task) =>
+      task.id === taskId ? { ...task, assigned_to: userId, assignee: userId ? teamMembers.find((member) => member.id === userId) : null } : task
+    ))
     try {
-      // Optimistic update
-      const assignee = userId ? teamMembers.find((member) => member.id === userId) : null
-      setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, assigned_to: userId, assignee } : task)))
-
-      const result = await ApiClient.assignTask(taskId, userId, currentUser?.id || "")
-
-      console.log("✅ Task assigned via API")
-
-      const assigneeName = assignee?.full_name || assignee?.email || "someone"
+      await ApiClient.assignTask(taskId, userId, currentUser?.id || "")
+      const assigneeName = userId ? (teamMembers.find((member) => member.id === userId)?.full_name || teamMembers.find((member) => member.id === userId)?.email || "someone") : "unassigned"
       toast({
         title: userId ? "Task Assigned!" : "Task Unassigned",
         description: userId ? `Task assigned to ${assigneeName}` : "Task has been unassigned",
         variant: "default",
       })
     } catch (error: any) {
-      console.error("Error assigning task:", error)
-
-      // Revert optimistic update on error
-      loadTasks(true)
-
+      // Revert on error
+      setLocalTasks(tasks)
       toast({
         title: "Assignment Failed",
         description: error.message || "Failed to assign task. Please try again.",
-        variant: "destructive",
-      })
-    }
-  }
-
-  // Drag and drop handlers
-  const handleDragStart = (e: React.DragEvent, taskId: string) => {
-    setDraggedTask(taskId)
-    e.dataTransfer.effectAllowed = "move"
-  }
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.dataTransfer.dropEffect = "move"
-  }
-
-  const handleDrop = async (e: React.DragEvent, targetIndex: number) => {
-    e.preventDefault()
-
-    if (!draggedTask) return
-
-    const reorderedTasks = TaskOrderingService.reorderTasks(tasks, draggedTask, targetIndex)
-
-    // Optimistic update
-    setTasks(reorderedTasks)
-    setDraggedTask(null)
-
-    // Update database
-    try {
-      await Promise.all(
-        reorderedTasks.map((task) =>
-          supabase.from("tasks").update({ order_index: task.order_index }).eq("id", task.id),
-        ),
-      )
-
-      toast({
-        title: "Task Order Updated",
-        description: "Task order has been saved successfully",
-        variant: "default",
-      })
-    } catch (error) {
-      console.error("Error updating task order:", error)
-      loadTasks(true) // Reload on error
-      toast({
-        title: "Error",
-        description: "Failed to save task order",
         variant: "destructive",
       })
     }
@@ -395,42 +334,71 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
       estimated_hours: task.estimated_hours,
       priority: task.priority,
       description: task.description || "",
+      order_index: task.order_index,
     })
   }
 
   const saveEdit = async () => {
-    if (!editingTask) return
+    if (!editingTask) return;
 
     try {
-      const { error } = await supabase
-        .from("tasks")
-        .update({
-          title: editValues.title,
-          description: editValues.description,
-          estimated_hours: editValues.estimated_hours,
-          priority: editValues.priority,
-        })
-        .eq("id", editingTask)
+      const taskToEdit = localTasks.find(t => t.id === editingTask);
+      if (!taskToEdit) return;
 
-      if (error) throw error
+      // Get all incomplete tasks, sorted by current order_index
+      const ordered = [...localTasks].filter(t => !t.completed).sort((a, b) => a.order_index - b.order_index);
+      const maxOrder = ordered.length - 1;
+      const newOrderIndex = Math.max(0, Math.min(editValues.order_index ?? taskToEdit.order_index, maxOrder));
 
-      setEditingTask(null)
-      loadTasks(true)
+      // Remove the task from its old position
+      const oldIndex = ordered.findIndex(t => t.id === editingTask);
+      if (oldIndex === -1) return;
+      const [removedTask] = ordered.splice(oldIndex, 1);
 
+      // Insert the task at the new position
+      ordered.splice(newOrderIndex, 0, { ...removedTask, ...editValues });
+
+      // Reassign order_index for all
+      ordered.forEach((t, idx) => { t.order_index = idx });
+
+      // Update DB for all tasks in the new order
+      await Promise.all(
+        ordered.map((task, idx) =>
+          supabase.from("tasks").update({
+            order_index: idx,
+            ...(task.id === editingTask ? {
+              title: editValues.title,
+              description: editValues.description,
+              estimated_hours: editValues.estimated_hours,
+              priority: editValues.priority,
+            } : {})
+          }).eq("id", task.id)
+        )
+      );
+
+      // Merge reordered incomplete tasks with completed tasks
+      const completed = localTasks.filter(t => t.completed);
+      const newTasks = [...ordered, ...completed];
+      setLocalTasks(prev => prev.map(task => {
+        const found = newTasks.find(t => t.id === task.id);
+        return found ? { ...task, ...found } : task;
+      }));
+
+      setEditingTask(null);
       toast({
         title: "Task Updated Successfully! ✨",
         description: "All changes have been saved",
         variant: "default",
-      })
+      });
     } catch (error: any) {
-      console.error("Error updating task:", error)
+      console.error("Error updating task:", error);
       toast({
         title: "Error",
         description: "Failed to update task",
         variant: "destructive",
-      })
+      });
     }
-  }
+  };
 
   const deleteTask = async (taskId: string) => {
     if (!confirm("Are you sure you want to delete this task?")) return
@@ -440,7 +408,8 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
       if (error) throw error
 
       // Optimistic update
-      setTasks((prev) => prev.filter((task) => task.id !== taskId))
+      const updatedTasks = tasks.filter((task) => task.id !== taskId)
+      onTasksChange()
 
       toast({
         title: "Task Deleted",
@@ -457,46 +426,6 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
     }
   }
 
-  const moveTaskUp = async (taskId: string) => {
-    const currentIndex = tasks.findIndex((task) => task.id === taskId)
-    if (currentIndex <= 0) return
-
-    const reorderedTasks = TaskOrderingService.reorderTasks(tasks, taskId, currentIndex - 1)
-    setTasks(reorderedTasks)
-
-    // Update database
-    try {
-      await Promise.all(
-        reorderedTasks.map((task) =>
-          supabase.from("tasks").update({ order_index: task.order_index }).eq("id", task.id),
-        ),
-      )
-    } catch (error) {
-      console.error("Error updating task order:", error)
-      loadTasks(true)
-    }
-  }
-
-  const moveTaskDown = async (taskId: string) => {
-    const currentIndex = tasks.findIndex((task) => task.id === taskId)
-    if (currentIndex >= tasks.length - 1) return
-
-    const reorderedTasks = TaskOrderingService.reorderTasks(tasks, taskId, currentIndex + 1)
-    setTasks(reorderedTasks)
-
-    // Update database
-    try {
-      await Promise.all(
-        reorderedTasks.map((task) =>
-          supabase.from("tasks").update({ order_index: task.order_index }).eq("id", task.id),
-        ),
-      )
-    } catch (error) {
-      console.error("Error updating task order:", error)
-      loadTasks(true)
-    }
-  }
-
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "high":
@@ -510,253 +439,304 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
     }
   }
 
-  const renderTaskCard = (task: Task, index: number) => (
-    <div
-      key={`${task.id}-${task.completed}-${task.assigned_to}-${task.order_index}`}
-      className={`p-4 rounded-lg border transition-all duration-300 animate-in fade-in slide-in-from-bottom-2 ${
-        task.completed
-          ? "bg-dark-bg/50 border-electric-green/30"
-          : "bg-dark-bg border-dark-border hover:border-electric-blue/50"
-      } ${draggedTask === task.id ? "opacity-50" : ""}`}
-      draggable={!task.completed && hackathon?.created_by === currentUser?.id}
-      onDragStart={(e) => handleDragStart(e, task.id)}
-      onDragOver={handleDragOver}
-      onDrop={(e) => handleDrop(e, index)}
-    >
-      <div className="flex items-start gap-3">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-electric-blue/20 flex items-center justify-center text-xs font-bold text-electric-blue">
-            {index + 1}
+  const allAssignableMembers = useMemo(() => {
+    if (!hackathon?.created_by) return teamMembers;
+    const creator = teamMembers.find((m) => m.id === hackathon.created_by) || {
+      id: hackathon.created_by,
+      full_name: hackathon.created_by === currentUser?.id ? (currentUser?.user_metadata?.full_name || currentUser?.email || "Creator") : "Creator",
+      email: currentUser?.email || ""
+    };
+    const exists = teamMembers.some((m) => m.id === creator.id);
+    return exists ? teamMembers : [creator, ...teamMembers];
+  }, [teamMembers, hackathon?.created_by, currentUser]);
+
+  const renderTaskCard = (task: Task, index: number, activeTab: string) => {
+    const ordered = [...localTasks].filter((task) => !task.completed).sort((a, b) => a.order_index - b.order_index);
+    const currentIndex = ordered.findIndex((t) => t.id === task.id);
+
+    return (
+      <div
+        key={`${task.id}-${task.completed}-${task.assigned_to}-${task.order_index}`}
+        className={`p-4 rounded-lg border transition-all duration-300 animate-in fade-in slide-in-from-bottom-2 ${
+          task.completed
+            ? "bg-dark-bg/50 border-electric-green/30"
+            : "bg-dark-bg border-dark-border hover:border-electric-blue/50"
+        } ${draggedTask === task.id ? "opacity-50" : ""}`}
+        draggable={!task.completed && hackathon?.created_by === currentUser?.id}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded-full bg-electric-blue/20 flex items-center justify-center text-xs font-bold text-electric-blue">
+              {index + 1}
+            </div>
+            <Checkbox
+              checked={task.completed}
+              onCheckedChange={(checked) => toggleTaskCompletion(task.id, checked as boolean)}
+              className="border-electric-blue data-[state=checked]:bg-electric-blue"
+            />
           </div>
-          <Checkbox
-            checked={task.completed}
-            onCheckedChange={(checked) => toggleTaskCompletion(task.id, checked as boolean)}
-            className="border-electric-blue data-[state=checked]:bg-electric-blue"
-          />
-        </div>
 
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex-1">
-              {editingTask === task.id ? (
-                <div className="space-y-4 p-4 bg-dark-bg/50 rounded-lg border border-electric-blue/30">
-                  <div>
-                    <Label htmlFor="edit-title" className="text-sm font-medium text-electric-blue">
-                      Task Title
-                    </Label>
-                    <Input
-                      id="edit-title"
-                      value={editValues.title}
-                      onChange={(e) => setEditValues({ ...editValues, title: e.target.value })}
-                      className="bg-dark-bg border-dark-border focus:border-electric-blue mt-1"
-                      placeholder="Enter task title..."
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="edit-description" className="text-sm font-medium text-electric-blue">
-                      Description
-                    </Label>
-                    <Textarea
-                      id="edit-description"
-                      value={editValues.description}
-                      onChange={(e) => setEditValues({ ...editValues, description: e.target.value })}
-                      className="bg-dark-bg border-dark-border focus:border-electric-blue mt-1"
-                      placeholder="Enter task description..."
-                      rows={3}
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex-1">
+                {editingTask === task.id ? (
+                  <div className="space-y-4 p-4 bg-dark-bg/50 rounded-lg border border-electric-blue/30">
                     <div>
-                      <Label htmlFor="edit-hours" className="text-sm font-medium text-electric-blue">
-                        Time to Complete (hours)
+                      <Label htmlFor="edit-title" className="text-sm font-medium text-electric-blue">
+                        Task Title
                       </Label>
                       <Input
-                        id="edit-hours"
-                        type="number"
-                        value={editValues.estimated_hours}
-                        onChange={(e) =>
-                          setEditValues({ ...editValues, estimated_hours: Number.parseInt(e.target.value) || 1 })
-                        }
+                        id="edit-title"
+                        value={editValues.title}
+                        onChange={(e) => setEditValues({ ...editValues, title: e.target.value })}
                         className="bg-dark-bg border-dark-border focus:border-electric-blue mt-1"
-                        min="1"
-                        max="24"
+                        placeholder="Enter task title..."
                       />
                     </div>
 
                     <div>
-                      <Label htmlFor="edit-priority" className="text-sm font-medium text-electric-blue">
-                        Difficulty Level
+                      <Label htmlFor="edit-description" className="text-sm font-medium text-electric-blue">
+                        Description
                       </Label>
-                      <Select
-                        value={editValues.priority}
-                        onValueChange={(value) => setEditValues({ ...editValues, priority: value })}
+                      <Textarea
+                        id="edit-description"
+                        value={editValues.description ?? ""}
+                        onChange={(e) => setEditValues({ ...editValues, description: e.target.value })}
+                        className="bg-dark-bg border-dark-border focus:border-electric-blue mt-1 min-h-[100px]"
+                        placeholder="Enter task description..."
+                        rows={4}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <div>
+                        <Label htmlFor="edit-hours" className="text-sm font-medium text-electric-blue">
+                          Time to Complete (hours)
+                        </Label>
+                        <Input
+                          id="edit-hours"
+                          type="number"
+                          value={editValues.estimated_hours}
+                          onChange={(e) => setEditValues({ ...editValues, estimated_hours: Number.parseInt(e.target.value) || 1 })}
+                          className="bg-dark-bg border-dark-border focus:border-electric-blue mt-1"
+                          min="1"
+                          max="24"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="edit-priority" className="text-sm font-medium text-electric-blue">
+                          Difficulty Level
+                        </Label>
+                        <Select
+                          value={editValues.priority}
+                          onValueChange={(value) => setEditValues({ ...editValues, priority: value as "medium" | "high" | "low" })}
+                        >
+                          <SelectTrigger className="bg-dark-bg border-dark-border mt-1">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent className="bg-dark-surface border-dark-border">
+                            <SelectItem value="low">Low</SelectItem>
+                            <SelectItem value="medium">Medium</SelectItem>
+                            <SelectItem value="high">High</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label htmlFor="edit-order" className="text-sm font-medium text-electric-blue">
+                          Order (1–{ordered.length})
+                        </Label>
+                        <Input
+                          id="edit-order"
+                          type="number"
+                          value={(editValues.order_index ?? index) + 1}
+                          onChange={(e) => {
+                            let val = Number.parseInt(e.target.value) || 1;
+                            val = Math.max(1, Math.min(val, ordered.length));
+                            setEditValues({ ...editValues, order_index: val - 1 });
+                          }}
+                          className="bg-dark-bg border-dark-border focus:border-electric-blue mt-1"
+                          min="1"
+                          max={ordered.length}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2">
+                      <Button
+                        size="sm"
+                        onClick={saveEdit}
+                        className="bg-electric-blue hover:bg-electric-blue/80 text-dark-bg font-medium px-4"
                       >
-                        <SelectTrigger className="bg-dark-bg border-dark-border mt-1">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent className="bg-dark-surface border-dark-border">
-                          <SelectItem value="low">Low</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="high">High</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Save Changes
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditingTask(null)}
+                        className="border-dark-border hover:bg-dark-surface px-4"
+                      >
+                        Cancel
+                      </Button>
                     </div>
                   </div>
+                ) : (
+                  <>
+                    <h4
+                      className={`font-medium ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}
+                    >
+                      {task.title}
+                    </h4>
+                    {task.description && (
+                      <p
+                        className={`text-sm mt-1 ${task.completed ? "line-through text-muted-foreground" : "text-muted-foreground"}`}
+                      >
+                        {task.description}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
 
-                  <div className="flex items-center gap-3 pt-2">
-                    <Button
-                      size="sm"
-                      onClick={saveEdit}
-                      className="bg-electric-blue hover:bg-electric-blue/80 text-dark-bg font-medium px-4"
-                    >
-                      <CheckCircle2 className="h-4 w-4 mr-2" />
-                      Save Changes
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setEditingTask(null)}
-                      className="border-dark-border hover:bg-dark-surface px-4"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <h4
-                    className={`font-medium ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}
-                  >
-                    {task.title}
-                  </h4>
-                  {task.description && (
-                    <p
-                      className={`text-sm mt-1 ${task.completed ? "line-through text-muted-foreground" : "text-muted-foreground"}`}
-                    >
-                      {task.description}
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className={getPriorityColor(task.priority)}>
-                {task.priority}
-              </Badge>
-              {task.estimated_hours && (
-                <Badge variant="outline" className="border-electric-blue/30 text-electric-blue">
-                  <Clock className="h-3 w-3 mr-1" />
-                  {task.estimated_hours}h
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className={getPriorityColor(task.priority)}>
+                  {task.priority}
                 </Badge>
-              )}
+                {task.estimated_hours && (
+                  <Badge variant="outline" className="border-electric-blue/30 text-electric-blue">
+                    <Clock className="h-3 w-3 mr-1" />
+                    {task.estimated_hours}h
+                  </Badge>
+                )}
 
-              {/* Task controls for creators */}
-              {hackathon?.created_by === currentUser?.id && !task.completed && editingTask !== task.id && (
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => moveTaskUp(task.id)}
-                    disabled={index === 0}
-                    className="h-8 w-8 p-0 hover:bg-electric-blue/20 hover:text-electric-blue"
-                    title="Move up"
-                  >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => moveTaskDown(task.id)}
-                    disabled={index === tasks.length - 1}
-                    className="h-8 w-8 p-0 hover:bg-electric-blue/20 hover:text-electric-blue"
-                    title="Move down"
-                  >
-                    <ArrowDown className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => startEditing(task)}
-                    className="h-8 w-8 p-0 hover:bg-electric-blue/20 hover:text-electric-blue"
-                    title="Edit task"
-                  >
-                    <Edit className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => deleteTask(task.id)}
-                    className="h-8 w-8 p-0 hover:bg-red-500/20 hover:text-red-400"
-                    title="Delete task"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                  <div className="cursor-grab hover:cursor-grabbing" title="Drag to reorder">
-                    <GripVertical className="h-4 w-4 text-muted-foreground" />
+                {/* Task controls for creators */}
+                {hackathon?.created_by === currentUser?.id && !task.completed && editingTask !== task.id && activeTab === 'ordered' && (
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => startEditing(task)}
+                      className="h-8 w-8 p-0 hover:bg-electric-blue/20 hover:text-electric-blue"
+                      title="Edit task"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteTask(task.id)}
+                      className="h-8 w-8 p-0 hover:bg-red-500/20 hover:text-red-400"
+                      title="Delete task"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
-                </div>
-              )}
-            </div>
-          </div>
+                )}
 
-          <div className="flex items-center justify-between mt-3">
-            <div className="flex items-center gap-2">
-              {task.assignee ? (
-                <div className="flex items-center gap-2">
-                  <Avatar className="h-6 w-6">
-                    <AvatarFallback className="text-xs bg-electric-blue text-dark-bg">
-                      {task.assignee?.full_name?.charAt(0) || task.assignee?.email?.charAt(0) || "?"}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="text-sm text-muted-foreground">
-                    {task.assignee?.full_name || task.assignee?.email || "Unknown User"}
+                {!(hackathon?.created_by === currentUser?.id && !task.completed && editingTask !== task.id && activeTab === 'ordered') && (
+                  <span className="text-xs text-yellow-400 ml-2">
+                    {!hackathon?.created_by || hackathon?.created_by !== currentUser?.id ? 'Not creator. ' : ''}
+                    {task.completed ? 'Completed. ' : ''}
+                    {editingTask === task.id ? 'Editing. ' : ''}
+                    {activeTab !== 'ordered' ? `Tab: ${activeTab}` : ''}
                   </span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <User className="h-4 w-4" />
-                  <span className="text-sm">Unassigned</span>
-                </div>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between mt-3">
+              <div className="flex items-center gap-2">
+                {task.assignee ? (
+                  <div className="flex items-center gap-2">
+                    <Avatar className="h-6 w-6">
+                      <AvatarFallback className="text-xs bg-electric-blue text-dark-bg">
+                        {task.assignee?.full_name?.charAt(0) || task.assignee?.email?.charAt(0) || "?"}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="text-sm text-muted-foreground">
+                      {task.assignee?.full_name || task.assignee?.email || "Unknown User"}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <User className="h-4 w-4" />
+                    <span className="text-sm">Unassigned</span>
+                  </div>
+                )}
+              </div>
+
+              {!task.completed && editingTask !== task.id && (
+                <Select
+                  value={task.assigned_to || 'unassigned'}
+                  onValueChange={(value) => assignTask(task.id, value === 'unassigned' ? null : value)}
+                >
+                  <SelectTrigger className="w-32 h-8 bg-dark-bg border-dark-border">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-dark-surface border-dark-border">
+                    <SelectItem value="unassigned">Unassigned</SelectItem>
+                    {allAssignableMembers.map((member) => (
+                      <SelectItem key={member.id} value={member.id}>
+                        {member.full_name || member.email}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </div>
 
-            {!task.completed && editingTask !== task.id && (
-              <Select
-                value={task.assigned_to || "unassigned"}
-                onValueChange={(value) => assignTask(task.id, value === "unassigned" ? null : value)}
-              >
-                <SelectTrigger className="w-32 h-8 bg-dark-bg border-dark-border">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-dark-surface border-dark-border">
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {teamMembers.map((member) => (
-                    <SelectItem key={member.id} value={member.id}>
-                      {member.full_name || member.email}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {typeof task.completed_at === 'string' && task.completed_at && (
+              <div className="text-xs text-electric-green mt-2">
+                Completed {new Date(task.completed_at).toLocaleDateString()}
+              </div>
             )}
           </div>
-
-          {task.completed_at && (
-            <div className="text-xs text-electric-green mt-2">
-              Completed {new Date(task.completed_at).toLocaleDateString()}
-            </div>
-          )}
         </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   const taskCategories = categorizedTasks()
   const completedTasks = taskCategories.completed.length
-  const totalTasks = tasks.length
+  const totalTasks = localTasks.length
   const progressPercentage = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0
+
+  const [reoptimising, setReoptimising] = useState(false)
+
+  const aiReoptimise = async () => {
+    setReoptimising(true)
+    try {
+      // Only reoptimise incomplete tasks
+      const incompleteTasks = localTasks.filter(t => !t.completed)
+      const completedTasks = localTasks.filter(t => t.completed)
+      const optimal = TaskOrderingService.calculateOptimalOrder(incompleteTasks)
+      // Update DB for all tasks in the new order
+      await Promise.all(
+        optimal.map((task, idx) =>
+          supabase.from("tasks").update({ order_index: idx }).eq("id", task.id)
+        )
+      )
+      // Merge optimal order with completed tasks (which keep their order_index)
+      const newTasks = [...optimal, ...completedTasks]
+      setLocalTasks(prev => prev.map(task => {
+        const found = newTasks.find(t => t.id === task.id)
+        return found ? { ...task, ...found } : task
+      }))
+      toast({
+        title: "AI Reoptimised!",
+        description: "Tasks have been reordered by optimal AI order.",
+        variant: "default",
+      })
+    } catch (error: any) {
+      toast({
+        title: "AI Reoptimise Failed",
+        description: error.message || "Could not reoptimise tasks.",
+        variant: "destructive",
+      })
+    } finally {
+      setReoptimising(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -811,10 +791,19 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
                 <Plus className="h-4 w-4 mr-2" />
                 Add Task
               </Button>
+              <Button
+                onClick={aiReoptimise}
+                size="sm"
+                variant="outline"
+                className="border-dark-border hover:bg-dark-surface"
+                disabled={reoptimising}
+              >
+                🤖 AI Reoptimise
+              </Button>
               {isConnected ? (
-                <Wifi className="h-4 w-4 text-electric-green" title="Real-time connected" />
+                <Wifi className="h-4 w-4 text-electric-green" />
               ) : (
-                <WifiOff className="h-4 w-4 text-red-400" title="Connection lost" />
+                <WifiOff className="h-4 w-4 text-red-400" />
               )}
             </div>
           </div>
@@ -852,32 +841,16 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
           )}
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full grid-cols-4 bg-dark-bg border-dark-border">
-              <TabsTrigger
-                value="ordered"
-                className="flex items-center gap-2 data-[state=active]:bg-electric-blue data-[state=active]:text-dark-bg"
-              >
+            <TabsList className="grid w-full grid-cols-3 bg-dark-bg border-dark-border">
+              <TabsTrigger value="ordered" className="flex items-center gap-2 data-[state=active]:bg-electric-blue data-[state=active]:text-dark-bg">
                 <Timer className="h-4 w-4" />
                 Optimal Order ({taskCategories.ordered.length})
               </TabsTrigger>
-              <TabsTrigger
-                value="unassigned"
-                className="flex items-center gap-2 data-[state=active]:bg-electric-blue data-[state=active]:text-dark-bg"
-              >
-                <ListTodo className="h-4 w-4" />
-                Unassigned ({taskCategories.unassigned.length})
-              </TabsTrigger>
-              <TabsTrigger
-                value="assigned"
-                className="flex items-center gap-2 data-[state=active]:bg-electric-blue data-[state=active]:text-dark-bg"
-              >
+              <TabsTrigger value="mytasks" className="flex items-center gap-2 data-[state=active]:bg-electric-blue data-[state=active]:text-dark-bg">
                 <UserCheck className="h-4 w-4" />
-                Assigned ({taskCategories.assigned.length})
+                My Tasks ({taskCategories.mytasks.length})
               </TabsTrigger>
-              <TabsTrigger
-                value="completed"
-                className="flex items-center gap-2 data-[state=active]:bg-electric-green data-[state=active]:text-dark-bg"
-              >
+              <TabsTrigger value="completed" className="flex items-center gap-2 data-[state=active]:bg-electric-green data-[state=active]:text-dark-bg">
                 <CheckSquare className="h-4 w-4" />
                 Completed ({taskCategories.completed.length})
               </TabsTrigger>
@@ -887,51 +860,24 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
               {taskCategories.ordered.length === 0 ? (
                 <div className="text-center py-8">
                   <Timer className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">All tasks are completed! Great job! 🎉</p>
+                  <p className="text-muted-foreground">No tasks yet. Add a task to get started!</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="text-sm text-electric-blue mb-4 p-3 bg-electric-blue/10 rounded-lg border border-electric-blue/30">
-                    📋 <strong>Smart Ordering:</strong> Tasks are automatically ordered by priority, dependencies, and
-                    estimated time for optimal completion.
-                    {hackathon?.created_by === currentUser?.id && (
-                      <span className="block mt-1">
-                        💡 <strong>Creator Controls:</strong> Drag tasks to reorder, or use arrow buttons to adjust the
-                        sequence.
-                      </span>
-                    )}
-                  </div>
-                  {taskCategories.ordered.map((task, index) => renderTaskCard(task, index))}
+                  {taskCategories.ordered.map((task, index) => renderTaskCard(task, index, 'ordered'))}
                 </div>
               )}
             </TabsContent>
 
-            <TabsContent value="unassigned" className="mt-4">
-              {taskCategories.unassigned.length === 0 ? (
-                <div className="text-center py-8">
-                  <ListTodo className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">
-                    No unassigned tasks. All tasks are either assigned or completed!
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {taskCategories.unassigned.map((task, index) => renderTaskCard(task, index))}
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="assigned" className="mt-4">
-              {taskCategories.assigned.length === 0 ? (
+            <TabsContent value="mytasks" className="mt-4">
+              {taskCategories.mytasks.length === 0 ? (
                 <div className="text-center py-8">
                   <UserCheck className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">
-                    No assigned tasks. Assign tasks to team members to get started!
-                  </p>
+                  <p className="text-muted-foreground">No tasks assigned to you yet.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {taskCategories.assigned.map((task, index) => renderTaskCard(task, index))}
+                  {taskCategories.mytasks.map((task, index) => renderTaskCard(task, index, 'mytasks'))}
                 </div>
               )}
             </TabsContent>
@@ -940,15 +886,11 @@ export function EnhancedTaskList({ hackathonId, hackathon }: EnhancedTaskListPro
               {taskCategories.completed.length === 0 ? (
                 <div className="text-center py-8">
                   <CheckSquare className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                  <p className="text-muted-foreground">No completed tasks yet. Complete some tasks to see them here!</p>
+                  <p className="text-muted-foreground">No completed tasks yet.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="text-sm text-electric-green mb-4">
-                    🎉 Great progress! {taskCategories.completed.length} task
-                    {taskCategories.completed.length !== 1 ? "s" : ""} completed
-                  </div>
-                  {taskCategories.completed.map((task, index) => renderTaskCard(task, index))}
+                  {taskCategories.completed.map((task, index) => renderTaskCard(task, index, 'completed'))}
                 </div>
               )}
             </TabsContent>

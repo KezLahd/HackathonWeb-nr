@@ -39,6 +39,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Target } from "lucide-react"
+import { EnhancedTaskList } from "@/components/hackathon/enhanced-task-list"
 
 interface Hackathon {
   id: string
@@ -328,6 +329,25 @@ export default function HackathonPage() {
     return Math.max(0, Math.floor((endTime - now) / (1000 * 60 * 60))) // Return hours, not milliseconds
   }
 
+  const loadTeamMembers = async () => {
+    try {
+      const { data: participantsData } = await supabase
+        .from("team_members")
+        .select(`
+          *,
+          profiles:user_id (
+            id,
+            full_name,
+            email
+          )
+        `)
+        .eq("hackathon_id", hackathonId)
+      setTeamMembers(participantsData || [])
+    } catch (error) {
+      console.error("Error loading team members:", error)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-dark-bg flex items-center justify-center">
@@ -495,329 +515,20 @@ export default function HackathonPage() {
             </Card>
 
             {/* Tasks Section */}
-            <Card className="border-glow bg-dark-surface/80 backdrop-blur-sm">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-glow flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-electric-blue" />
-                    Tasks ({completedTasks.length}/{tasks.length})
-                  </CardTitle>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      onClick={optimizeTaskOrder}
-                      size="sm"
-                      variant="outline"
-                      className="border-electric-blue/30 text-electric-blue hover:bg-electric-blue/20"
-                    >
-                      <Zap className="h-4 w-4 mr-2" />
-                      AI Optimize
-                    </Button>
-                    <Button
-                      onClick={() => setShowGantt(!showGantt)}
-                      size="sm"
-                      variant={showGantt ? "default" : "outline"}
-                      className={
-                        showGantt
-                          ? "bg-electric-blue hover:bg-electric-blue/80 text-dark-bg"
-                          : "border-electric-blue/30 text-electric-blue hover:bg-electric-blue/20"
-                      }
-                    >
-                      <BarChart3 className="h-4 w-4 mr-2" />
-                      {showGantt ? "Hide" : "Show"} Gantt
-                    </Button>
-                    <Button
-                      onClick={() => setIsAddModalOpen(true)}
-                      size="sm"
-                      className="bg-electric-blue hover:bg-electric-blue/80 text-dark-bg"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add Task
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="mt-4">
-                  <div className="flex items-center justify-between text-sm text-muted-foreground mb-2">
-                    <span>Progress</span>
-                    <span>
-                      {progressPercentage}% Updated: {new Date().toLocaleTimeString()}
-                    </span>
-                  </div>
-                  <div className="w-full bg-dark-bg rounded-full h-2">
-                    <div
-                      className="bg-electric-blue h-2 rounded-full transition-all duration-300 glow-effect"
-                      style={{ width: `${progressPercentage}%` }}
-                    />
-                  </div>
-                </div>
-              </CardHeader>
-
-              <CardContent>
-                {showGantt && (
-                  <div className="mb-6">
-                    <GanttChart
+            <EnhancedTaskList
+              hackathonId={hackathonId}
+              hackathon={hackathon}
                       tasks={tasks}
-                      teamMembers={teamMembers.map((m) => m.profiles).filter(Boolean)}
-                      hackathonStart={hackathon.start_time}
-                      hackathonEnd={hackathon.end_time}
-                      currentUserId={currentUser?.id}
-                    />
-                  </div>
-                )}
-
-                <Tabs defaultValue="unassigned" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3 bg-dark-bg border-dark-border">
-                    <TabsTrigger
-                      value="unassigned"
-                      className="flex items-center gap-2 data-[state=active]:bg-electric-blue data-[state=active]:text-dark-bg"
-                    >
-                      <ListTodo className="h-4 w-4" />
-                      Unassigned ({unassignedTasks.length})
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="assigned"
-                      className="flex items-center gap-2 data-[state=active]:bg-electric-blue data-[state=active]:text-dark-bg"
-                    >
-                      <UserCheck className="h-4 w-4" />
-                      Assigned ({assignedTasks.length})
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="completed"
-                      className="flex items-center gap-2 data-[state=active]:bg-electric-green data-[state=active]:text-dark-bg"
-                    >
-                      <CheckSquare className="h-4 w-4" />
-                      Completed ({completedTasks.length})
-                    </TabsTrigger>
-                  </TabsList>
-
-                  {/* Enhanced Task Rendering Function */}
-                  {[
-                    {
-                      key: "unassigned",
-                      tasks: unassignedTasks,
-                      icon: ListTodo,
-                      emptyMessage: "No unassigned tasks. All tasks are either assigned or completed!",
-                    },
-                    {
-                      key: "assigned",
-                      tasks: assignedTasks,
-                      icon: UserCheck,
-                      emptyMessage: "No assigned tasks. Assign tasks to team members to get started!",
-                    },
-                    {
-                      key: "completed",
-                      tasks: completedTasks,
-                      icon: CheckSquare,
-                      emptyMessage: "No completed tasks yet. Complete some tasks to see them here!",
-                    },
-                  ].map(({ key, tasks: tabTasks, icon: Icon, emptyMessage }) => (
-                    <TabsContent key={key} value={key} className="mt-4">
-                      {tabTasks.length === 0 ? (
-                        <div className="text-center py-8">
-                          <Icon className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                          <p className="text-muted-foreground">{emptyMessage}</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-3">
-                          {key === "completed" && (
-                            <div className="text-sm text-electric-green mb-4">
-                              🎉 Great progress! {tabTasks.length} task{tabTasks.length !== 1 ? "s" : ""} completed
-                            </div>
-                          )}
-                          {tabTasks.map((task, index) => (
-                            <div
-                              key={task.id}
-                              className={`p-4 rounded-lg border transition-all duration-300 ${
-                                task.completed
-                                  ? "bg-dark-bg/50 border-electric-green/30"
-                                  : "bg-dark-bg border-dark-border hover:border-electric-blue/50"
-                              }`}
-                            >
-                              <div className="flex items-start gap-3">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-6 h-6 rounded-full bg-electric-blue/20 flex items-center justify-center text-xs font-bold text-electric-blue">
-                                    {index + 1}
-                                  </div>
-                                  <Checkbox
-                                    checked={task.completed}
-                                    onCheckedChange={(checked) => toggleTaskCompletion(task.id, checked as boolean)}
-                                    className="border-electric-blue data-[state=checked]:bg-electric-blue"
-                                  />
-                                </div>
-
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-start justify-between gap-2">
-                                    <div className="flex-1">
-                                      {editingTask === task.id ? (
-                                        <div className="space-y-2">
-                                          <Input
-                                            value={editValues.title}
-                                            onChange={(e) => setEditValues({ ...editValues, title: e.target.value })}
-                                            className="bg-dark-bg border-dark-border"
-                                          />
-                                          <div className="flex items-center gap-2">
-                                            <Input
-                                              type="number"
-                                              value={editValues.estimated_hours}
-                                              onChange={(e) =>
-                                                setEditValues({
-                                                  ...editValues,
-                                                  estimated_hours: Number.parseInt(e.target.value),
-                                                })
-                                              }
-                                              className="w-20 bg-dark-bg border-dark-border"
-                                              min="1"
-                                              max="24"
-                                            />
-                                            <span className="text-sm text-muted-foreground">hours</span>
-                                            <Button
-                                              size="sm"
-                                              onClick={saveEdit}
-                                              className="bg-electric-blue hover:bg-electric-blue/80"
-                                            >
-                                              Save
-                                            </Button>
-                                            <Button size="sm" variant="outline" onClick={() => setEditingTask(null)}>
-                                              Cancel
-                                            </Button>
-                                          </div>
-                                        </div>
-                                      ) : (
-                                        <>
-                                          <h4
-                                            className={`font-medium ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}
-                                          >
-                                            {task.title}
-                                          </h4>
-                                          {task.description && (
-                                            <p
-                                              className={`text-sm mt-1 ${task.completed ? "line-through text-muted-foreground" : "text-muted-foreground"}`}
-                                            >
-                                              {task.description}
-                                            </p>
-                                          )}
-                                        </>
-                                      )}
-                                    </div>
-
-                                    <div className="flex items-center gap-2">
-                                      {/* Replace the priority badge rendering with proper colors */}
-                                      <Badge
-                                        variant="outline"
-                                        className={`${
-                                          task.priority === "high"
-                                            ? "border-red-500/50 text-red-400 bg-red-500/10"
-                                            : task.priority === "medium"
-                                              ? "border-yellow-500/50 text-yellow-400 bg-yellow-500/10"
-                                              : "border-green-500/50 text-green-400 bg-green-500/10"
-                                        }`}
-                                      >
-                                        {task.priority}
-                                      </Badge>
-
-                                      {task.estimated_hours && (
-                                        <Badge variant="outline" className="border-electric-blue/30 text-electric-blue">
-                                          <Clock className="h-3 w-3 mr-1" />
-                                          {task.estimated_hours}h
-                                        </Badge>
-                                      )}
-
-                                      {/* Task controls */}
-                                      {!task.completed && editingTask !== task.id && (
-                                        <div className="flex items-center gap-1">
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => startEditing(task)}
-                                            className="h-8 w-8 p-0 hover:bg-electric-blue/20 hover:text-electric-blue"
-                                            title="Edit task"
-                                          >
-                                            <Edit className="h-4 w-4" />
-                                          </Button>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => deleteTask(task.id)}
-                                            className="h-8 w-8 p-0 hover:bg-red-500/20 hover:text-red-400"
-                                            title="Delete task"
-                                          >
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex items-center justify-between mt-3">
-                                    <div className="flex items-center gap-2">
-                                      {task.assignee ? (
-                                        <div className="flex items-center gap-2">
-                                          <Avatar className="h-6 w-6">
-                                            <AvatarFallback className="text-xs bg-electric-blue text-dark-bg">
-                                              {task.assignee?.full_name?.charAt(0) ||
-                                                task.assignee?.email?.charAt(0) ||
-                                                "?"}
-                                            </AvatarFallback>
-                                          </Avatar>
-                                          <span className="text-sm text-muted-foreground">
-                                            {task.assignee?.full_name || task.assignee?.email || "Unknown User"}
-                                          </span>
-                                        </div>
-                                      ) : (
-                                        <div className="flex items-center gap-2 text-muted-foreground">
-                                          <User className="h-4 w-4" />
-                                          <span className="text-sm">Unassigned</span>
-                                        </div>
-                                      )}
-                                    </div>
-
-                                    {!task.completed && editingTask !== task.id && (
-                                      <Select
-                                        value={task.assigned_to || "unassigned"}
-                                        onValueChange={(value) =>
-                                          assignTask(task.id, value === "unassigned" ? null : value)
-                                        }
-                                      >
-                                        <SelectTrigger className="w-32 h-8 bg-dark-bg border-dark-border">
-                                          <SelectValue />
-                                        </SelectTrigger>
-                                        {/* Fixed duplicate user issue */}
-                                        <SelectContent className="bg-dark-surface border-dark-border">
-                                          <SelectItem value="unassigned">Unassigned</SelectItem>
-                                          {assignableUsers.map((user) => (
-                                            <SelectItem key={user.id} value={user.id}>
-                                              {user.full_name || user.email}
-                                              {user.isCurrentUser ? " (You)" : ""}
-                                            </SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    )}
-                                  </div>
-
-                                  {task.completed_at && (
-                                    <div className="text-xs text-electric-green mt-2">
-                                      Completed {new Date(task.completed_at).toLocaleDateString()}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </TabsContent>
-                  ))}
-                </Tabs>
-              </CardContent>
-            </Card>
+              teamMembers={teamMembers}
+              onTasksChange={loadTasks}
+              onTeamChange={loadTeamMembers}
+            />
           </div>
 
           {/* Sidebar - Right Side */}
           <div className="space-y-6">
             {/* Team Management */}
-            <EnhancedTeamManagement hackathonId={hackathonId} hackathon={hackathon} />
+            <EnhancedTeamManagement hackathon={hackathon} />
 
             {/* AI Insights */}
             <AIInsights hackathon={hackathon} tasks={tasks} teamMembers={teamMembers} timeRemaining={timeRemaining} />
@@ -826,10 +537,8 @@ export default function HackathonPage() {
             <AITaskSuggestions
               hackathon={hackathon}
               tasks={tasks}
-              teamMembers={teamMembers}
               timeRemaining={timeRemaining}
               onTaskAdded={() => {
-                // Reload tasks when a new task is added
                 window.location.reload()
               }}
             />

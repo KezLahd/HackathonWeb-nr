@@ -22,6 +22,8 @@ import {
   CheckSquare,
   Edit,
   Trash2,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react"
 import { AddTaskModal } from "./add-task-modal"
 import { useToast } from "@/hooks/use-toast"
@@ -40,6 +42,7 @@ interface Task {
     full_name: string
     email: string
   }
+  order_index: number
 }
 
 interface TaskListProps {
@@ -83,22 +86,23 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
       }
 
       // Finally by creation time (older tasks first)
-      return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
+      return 0;
     })
   }, [])
 
   // Categorize tasks into tabs
   const categorizedTasks = useCallback(() => {
-    const unassigned = tasks.filter((task) => !task.assigned_to && !task.completed)
-    const assigned = tasks.filter((task) => task.assigned_to && !task.completed)
-    const completed = tasks.filter((task) => task.completed)
-
+    const unassigned = tasks.filter((task) => !task.assigned_to && !task.completed).sort((a, b) => a.order_index - b.order_index)
+    const assigned = tasks.filter((task) => task.assigned_to && !task.completed).sort((a, b) => a.order_index - b.order_index)
+    const completed = tasks.filter((task) => task.completed).sort((a, b) => a.order_index - b.order_index)
+    const ordered = tasks.filter((task) => !task.completed).sort((a, b) => a.order_index - b.order_index)
     return {
-      unassigned: sortTasks(unassigned),
-      assigned: sortTasks(assigned),
-      completed: sortTasks(completed),
+      unassigned,
+      assigned,
+      completed,
+      ordered,
     }
-  }, [tasks, sortTasks])
+  }, [tasks])
 
   // Enhanced task loading using API endpoint
   const loadTasks = useCallback(
@@ -182,7 +186,7 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
           console.log(
             "🔄 REAL-TIME: Task change detected:",
             payload.eventType,
-            payload.new?.title || payload.old?.title,
+            (payload.new as { title?: string })?.title || (payload.old as { title?: string })?.title,
           )
           setIsConnected(true)
 
@@ -407,7 +411,55 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
     }
   }
 
-  const renderTaskCard = (task: Task) => (
+  const moveTaskUp = async (taskId: string) => {
+    const ordered = categorizedTasks().unassigned;
+    const currentIndex = ordered.findIndex((task) => task.id === taskId);
+    if (currentIndex <= 0) return;
+    const reordered = [...ordered];
+    [reordered[currentIndex - 1], reordered[currentIndex]] = [reordered[currentIndex], reordered[currentIndex - 1]];
+    reordered[currentIndex - 1].order_index = currentIndex - 1;
+    reordered[currentIndex].order_index = currentIndex;
+    const newTasks = tasks.map((task) => {
+      const found = reordered.find((t) => t.id === task.id);
+      return found ? { ...task, order_index: found.order_index } : task;
+    });
+    setTasks(newTasks);
+    try {
+      await Promise.all([
+        supabase.from("tasks").update({ order_index: reordered[currentIndex - 1].order_index }).eq("id", reordered[currentIndex - 1].id),
+        supabase.from("tasks").update({ order_index: reordered[currentIndex].order_index }).eq("id", reordered[currentIndex].id),
+      ]);
+    } catch (error) {
+      console.error("Error updating task order:", error);
+      loadTasks(true);
+    }
+  };
+
+  const moveTaskDown = async (taskId: string) => {
+    const ordered = categorizedTasks().unassigned;
+    const currentIndex = ordered.findIndex((task) => task.id === taskId);
+    if (currentIndex === -1 || currentIndex >= ordered.length - 1) return;
+    const reordered = [...ordered];
+    [reordered[currentIndex], reordered[currentIndex + 1]] = [reordered[currentIndex + 1], reordered[currentIndex]];
+    reordered[currentIndex].order_index = currentIndex;
+    reordered[currentIndex + 1].order_index = currentIndex + 1;
+    const newTasks = tasks.map((task) => {
+      const found = reordered.find((t) => t.id === task.id);
+      return found ? { ...task, order_index: found.order_index } : task;
+    });
+    setTasks(newTasks);
+    try {
+      await Promise.all([
+        supabase.from("tasks").update({ order_index: reordered[currentIndex].order_index }).eq("id", reordered[currentIndex].id),
+        supabase.from("tasks").update({ order_index: reordered[currentIndex + 1].order_index }).eq("id", reordered[currentIndex + 1].id),
+      ]);
+    } catch (error) {
+      console.error("Error updating task order:", error);
+      loadTasks(true);
+    }
+  };
+
+  const renderTaskCard = (task: Task, index: number, activeTab: string) => (
     <div
       key={`${task.id}-${task.completed}-${task.assigned_to}`}
       className={`p-4 rounded-lg border transition-all duration-300 animate-in fade-in slide-in-from-bottom-2 ${
@@ -525,6 +577,31 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
           )}
         </div>
       </div>
+
+      {activeTab === 'ordered' && (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => moveTaskUp(task.id)}
+            disabled={categorizedTasks().unassigned.indexOf(task) === 0}
+            className="h-8 w-8 p-0 hover:bg-electric-blue/20 hover:text-electric-blue"
+            title="Move up"
+          >
+            <ArrowUp className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => moveTaskDown(task.id)}
+            disabled={categorizedTasks().unassigned.indexOf(task) === categorizedTasks().unassigned.length - 1}
+            className="h-8 w-8 p-0 hover:bg-electric-blue/20 hover:text-electric-blue"
+            title="Move down"
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+        </>
+      )}
     </div>
   )
 
@@ -574,9 +651,9 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
                 Add Task
               </Button>
               {isConnected ? (
-                <Wifi className="h-4 w-4 text-electric-green" title="Real-time connected" />
+                <Wifi className="h-4 w-4 text-electric-green" />
               ) : (
-                <WifiOff className="h-4 w-4 text-red-400" title="Connection lost" />
+                <WifiOff className="h-4 w-4 text-red-400" />
               )}
             </div>
           </div>
@@ -623,6 +700,7 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
                 <CheckSquare className="h-4 w-4" />
                 Completed ({taskCategories.completed.length})
               </TabsTrigger>
+              <TabsTrigger value="ordered" className="flex items-center gap-2 data-[state=active]:bg-electric-blue data-[state=active]:text-dark-bg">Optimal Order</TabsTrigger>
             </TabsList>
 
             <TabsContent value="unassigned" className="mt-4">
@@ -638,7 +716,7 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
                   <div className="text-sm text-muted-foreground mb-4">
                     Sorted by priority (high → low) and estimated time (quick wins first)
                   </div>
-                  {taskCategories.unassigned.map(renderTaskCard)}
+                  {taskCategories.unassigned.map((task, index) => renderTaskCard(task, index, activeTab))}
                 </div>
               )}
             </TabsContent>
@@ -656,7 +734,7 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
                   <div className="text-sm text-muted-foreground mb-4">
                     Sorted by priority (high → low) and estimated time (quick wins first)
                   </div>
-                  {taskCategories.assigned.map(renderTaskCard)}
+                  {taskCategories.assigned.map((task, index) => renderTaskCard(task, index, activeTab))}
                 </div>
               )}
             </TabsContent>
@@ -673,7 +751,25 @@ export function TaskList({ hackathonId, hackathon }: TaskListProps) {
                     🎉 Great progress! {taskCategories.completed.length} task
                     {taskCategories.completed.length !== 1 ? "s" : ""} completed
                   </div>
-                  {taskCategories.completed.map(renderTaskCard)}
+                  {taskCategories.completed.map((task, index) => renderTaskCard(task, index, activeTab))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="ordered" className="mt-4">
+              {taskCategories.ordered.length === 0 ? (
+                <div className="text-center py-8">
+                  <ListTodo className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground">
+                    No unassigned tasks. All tasks are either assigned or completed!
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="text-sm text-muted-foreground mb-4">
+                    Sorted by order_index
+                  </div>
+                  {taskCategories.ordered.map((task, index) => renderTaskCard(task, index, activeTab))}
                 </div>
               )}
             </TabsContent>
