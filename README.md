@@ -106,5 +106,5 @@ No license granted — source visible for portfolio purposes. If you want to act
 ---
 
 <p align="center">
-  <sub>Built with <a href="https://github.com/KezLahd">Kieran Jackson</a> · the early-vibe-coding days · 2025</sub>
+  <sub>Built with <a href="https://github.com/KezLahd">Kieran Jackson</a> · the early-vibe-coding days · 2025 · Another <a href="https://instagram.com/kieranjxn">Kez Curation ↗</a></sub>
 </p>
