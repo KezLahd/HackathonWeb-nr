@@ -25,3 +25,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Internal planning / implementation notes — kept locally, not shipped publicly
+*_STATUS.md
+*_PLAN.md
+*_NOTES.md
+*_EXPLANATION.md
